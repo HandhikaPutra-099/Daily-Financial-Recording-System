@@ -10,7 +10,7 @@ export const {
   additionalPrecacheEntries: [
     {
       url: "/offline",
-      revision: "daily-finance-v1",
+      revision: "daily-finance-v2",
     },
   ],
   swSrc: "app/sw.js",

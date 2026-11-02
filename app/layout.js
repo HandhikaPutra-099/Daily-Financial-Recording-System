@@ -13,25 +13,40 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Daily Finance",
+  title: {
+    default: "DuetKu",
+    template: "%s | DuetKu",
+  },
   description:
-    "Aplikasi pencatatan pemasukan dan pengeluaran harian.",
-  applicationName: "Daily Finance",
+    "Keuangan pribadi, lebih terarah. Catat transaksi, pantau anggaran, dan pahami arus kasmu.",
+  applicationName: "DuetKu",
 
   appleWebApp: {
     capable: true,
-    title: "Daily Finance",
+    title: "DuetKu",
     statusBarStyle: "default",
+  },
+  openGraph: {
+    title: "DuetKu",
+    description: "Keuangan pribadi, lebih terarah.",
+    siteName: "DuetKu",
+    locale: "id_ID",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "DuetKu",
+    description: "Keuangan pribadi, lebih terarah.",
   },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      lang="id"
+      className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <body>
+      <body className="h-full">
         <SerwistProvider swUrl="/serwist/sw.js">
           {children}
         </SerwistProvider>

@@ -2,7 +2,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { supabase } from "../../lib/supabase";
+import AppShell from "../components/AppShell";
+import ConfirmButton from "../components/ConfirmButton";
+import PageHeader from "../components/PageHeader";
+import { formatUserFacingError } from "../../lib/user-facing-error";
 
 export default function CategoriesPage() {
   // State pengguna
@@ -11,6 +16,7 @@ export default function CategoriesPage() {
 
   // State kategori
   const [categories, setCategories] = useState([]);
+  const [categoriesOwnerId, setCategoriesOwnerId] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // State formulir
@@ -33,7 +39,12 @@ export default function CategoriesPage() {
       if (!active) return;
 
       if (error) {
-        setError(error.message);
+        setError(
+          formatUserFacingError(
+            error,
+            "Akunmu belum berhasil diperiksa. Coba lagi, ya.",
+          ),
+        );
       }
 
       setUser(data.session?.user ?? null);
@@ -57,11 +68,7 @@ export default function CategoriesPage() {
 
   // 2. Mengambil kategori dari Supabase
   useEffect(() => {
-    if (!user) {
-      setCategories([]);
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
 
     let active = true;
 
@@ -78,11 +85,18 @@ export default function CategoriesPage() {
       if (!active) return;
 
       if (error) {
-        setError(error.message);
+        setCategories([]);
+        setError(
+          formatUserFacingError(
+            error,
+            "Kategori belum berhasil dimuat. Coba lagi, ya.",
+          ),
+        );
       } else {
         setCategories(data ?? []);
       }
 
+      setCategoriesOwnerId(user.id);
       setLoading(false);
     }
 
@@ -100,7 +114,7 @@ export default function CategoriesPage() {
     const cleanName = name.trim();
 
     if (!cleanName) {
-      setError("Nama kategori tidak boleh kosong.");
+      setError("Masukkan nama kategori, ya.");
       return;
     }
 
@@ -132,10 +146,16 @@ export default function CategoriesPage() {
       }
 
       if (result.error) {
-        setError(result.error.message);
+        setError(
+          formatUserFacingError(
+            result.error,
+            "Kategori belum berhasil disimpan. Coba lagi, ya.",
+          ),
+        );
         return;
       }
 
+      setCategoriesOwnerId(user.id);
       if (editingId) {
         setCategories((current) =>
           current.map((item) =>
@@ -143,7 +163,7 @@ export default function CategoriesPage() {
           )
         );
 
-        setMessage("Kategori berhasil diperbarui.");
+        setMessage("Kategorinya berhasil diperbarui.");
       } else {
         setCategories((current) =>
           [...current, result.data].sort((a, b) =>
@@ -158,7 +178,12 @@ export default function CategoriesPage() {
       setName("");
       setType("expense");
     } catch (err) {
-      setError(err.message);
+      setError(
+        formatUserFacingError(
+          err,
+          "Kategori belum berhasil disimpan. Coba lagi, ya.",
+        ),
+      );
     } finally {
       setSaving(false);
     }
@@ -184,12 +209,6 @@ export default function CategoriesPage() {
 
   // 6. Menghapus kategori
   async function handleDelete(item) {
-    const confirmed = window.confirm(
-      `Hapus kategori "${item.name}"?`
-    );
-
-    if (!confirmed) return;
-
     setError("");
     setMessage("");
 
@@ -199,10 +218,16 @@ export default function CategoriesPage() {
       .eq("id", item.id);
 
     if (error) {
-      setError(error.message);
+      setError(
+        formatUserFacingError(
+          error,
+          "Kategori belum berhasil dihapus. Coba lagi, ya.",
+        ),
+      );
       return;
     }
 
+    setCategoriesOwnerId(user.id);
     setCategories((current) =>
       current.filter((category) => category.id !== item.id)
     );
@@ -214,16 +239,27 @@ export default function CategoriesPage() {
     setMessage("Kategori berhasil dihapus.");
   }
 
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
+
+  const isCategoriesLoading =
+    Boolean(user) && (loading || categoriesOwnerId !== user.id);
+  const currentError = categoriesOwnerId === user?.id ? error : "";
+  const currentMessage = categoriesOwnerId === user?.id ? message : "";
+
   // Menampilkan daftar kategori
   function renderCategoryList(categoryType) {
-    const filtered = categories.filter(
+    const currentCategories =
+      categoriesOwnerId === user?.id ? categories : [];
+    const filtered = currentCategories.filter(
       (item) => item.type === categoryType
     );
 
     if (filtered.length === 0) {
       return (
-        <p className="py-4 text-sm text-slate-400">
-          Belum ada kategori.
+        <p className="py-4 text-sm text-[#a1a5b7]">
+          Belum ada kategori nih. Tambahkan kategori supaya transaksi lebih mudah dikelompokkan.
         </p>
       );
     }
@@ -233,28 +269,26 @@ export default function CategoriesPage() {
         {filtered.map((item) => (
           <div
             key={item.id}
-            className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-0"
+            className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-[#2a2e38] pb-3 last:border-0"
           >
-            <p className="font-medium text-slate-700">
+            <p className="font-medium text-[#f4f5f7]">
               {item.name}
             </p>
 
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleEdit(item)}
-                className="rounded-md bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700"
+                className="min-h-11 rounded-lg border border-[#383d49] px-3 text-xs font-semibold text-[#c8f76a] transition-colors hover:bg-[#232631]"
               >
                 Edit
               </button>
-
-              <button
-                type="button"
-                onClick={() => handleDelete(item)}
-                className="rounded-md bg-red-100 px-3 py-1 text-xs font-semibold text-red-700"
-              >
-                Hapus
-              </button>
+              <ConfirmButton
+                label="Hapus"
+                confirmLabel={`Yakin mau menghapus kategori ${item.name}?`}
+                confirmDescription="Kategori yang dihapus tidak bisa dikembalikan."
+                onConfirm={() => handleDelete(item)}
+              />
             </div>
           </div>
         ))}
@@ -266,7 +300,7 @@ export default function CategoriesPage() {
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        Memeriksa akun...
+        Menyiapkan DuetKu...
       </div>
     );
   }
@@ -274,18 +308,18 @@ export default function CategoriesPage() {
   // Jika belum login
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-5">
-        <div className="rounded-xl bg-white p-6 text-center shadow">
+      <main className="flex min-h-screen items-center justify-center bg-[#0b0d10] p-5">
+        <div className="finance-card p-6 text-center">
           <p className="mb-4">
-            Silakan login terlebih dahulu.
+            Masuk dulu, ya, untuk melihat halaman ini.
           </p>
 
-          <a
+          <Link
             href="/"
-            className="font-semibold text-blue-700"
+            className="font-semibold text-[#c8f76a] underline underline-offset-2"
           >
-            Kembali ke halaman login
-          </a>
+            Kembali ke DuetKu
+          </Link>
         </div>
       </main>
     );
@@ -293,126 +327,113 @@ export default function CategoriesPage() {
 
   // Tampilan utama kategori
   return (
-    <main className="min-h-screen bg-slate-100 p-5 text-slate-800 md:p-10">
-      <div className="mx-auto max-w-3xl">
+    <AppShell user={user} onLogout={handleLogout}>
+      <div className="mx-auto max-w-5xl space-y-5">
+        <PageHeader
+          title="Kategori"
+          subtitle="Buat kategori untuk mengelompokkan uang masuk dan uang keluar."
+        />
 
-        {/* Header */}
-        <header className="mb-8">
-          <a
-            href="/"
-            className="text-sm font-medium text-blue-700"
-          >
-            ← Kembali ke Dashboard
-          </a>
-
-          <h1 className="mt-4 text-2xl font-bold">
-            Pengelolaan Kategori
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Atur kategori pemasukan dan pengeluaranmu.
-          </p>
-        </header>
-
-        {/* Form kategori */}
-        <section className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-          <h2 className="mb-5 text-lg font-bold">
-            {editingId ? "Edit Kategori" : "Tambah Kategori"}
+        <section className="finance-card p-5 sm:p-6">
+          <h2 className="mb-5 text-lg font-semibold text-[#f4f5f7]">
+            {editingId ? "Ubah kategori" : "Tambah kategori"}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">
-                Nama Kategori
+              <label htmlFor="category-name" className="mb-1.5 block text-sm font-medium text-[#f4f5f7]">
+                Nama kategori
               </label>
 
               <input
+                id="category-name"
                 type="text"
                 placeholder="Contoh: Makanan"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-300 p-3"
+                className="finance-input"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">
-                Jenis Kategori
+              <label htmlFor="category-type" className="mb-1.5 block text-sm font-medium text-[#f4f5f7]">
+                Jenis transaksi
               </label>
 
               <select
+                id="category-type"
                 value={type}
                 onChange={(e) => setType(e.target.value)}
                 disabled={Boolean(editingId)}
-                className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                className="finance-input disabled:bg-[#262a33]"
               >
-                <option value="income">Pemasukan</option>
-                <option value="expense">Pengeluaran</option>
+                <option value="income">Uang masuk</option>
+                <option value="expense">Uang keluar</option>
               </select>
 
               {editingId && (
-                <p className="mt-1 text-xs text-slate-400">
-                  Jenis kategori tidak dapat diubah saat mengedit.
+                <p className="mt-1 text-xs text-[#8a8ea4]">
+                  Jenis kategori tidak bisa diubah saat diedit.
                 </p>
               )}
             </div>
 
-            {error && (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
-                {error}
+            {currentError && (
+              <p role="alert" className="rounded-lg border border-[#49313c] bg-[#301f27] p-3 text-sm text-[#ff9caf]">
+                {currentError}
               </p>
             )}
 
-            {message && (
-              <p className="rounded-lg bg-green-50 p-3 text-sm text-green-700">
-                {message}
+            {currentMessage && (
+              <p role="status" className="rounded-lg border border-[#245240] bg-[#172a25] p-3 text-sm text-[#62dfa7]">
+                {currentMessage}
               </p>
             )}
 
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-lg bg-blue-700 p-3 font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+              className="finance-button-primary w-full disabled:opacity-50"
             >
               {saving
                 ? "Menyimpan..."
                 : editingId
-                  ? "Simpan Perubahan"
-                  : "Tambah Kategori"}
+                  ? "Simpan perubahan"
+                  : "Tambah kategori"}
             </button>
 
             {editingId && (
               <button
                 type="button"
                 onClick={handleCancel}
-                className="w-full rounded-lg border border-slate-300 p-3 font-semibold"
+                className="finance-button-secondary w-full"
               >
-                Batal Edit
+                Batal ubah
               </button>
             )}
           </form>
         </section>
 
         {/* Daftar kategori */}
-        {loading ? (
-          <p className="text-center text-slate-500">
-            Memuat kategori...
+        {isCategoriesLoading ? (
+          <p role="status" className="finance-card py-10 text-center text-[#a1a5b7]">
+            Menyiapkan kategori...
           </p>
         ) : (
-          <div className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-2">
 
-            <section className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-bold text-green-700">
-                Kategori Pemasukan
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-[#36c98b]">
+                Kategori uang masuk
               </h2>
 
               {renderCategoryList("income")}
             </section>
 
-            <section className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-lg font-bold text-red-600">
-                Kategori Pengeluaran
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-4 text-lg font-semibold text-[#d48af7]">
+                Kategori uang keluar
               </h2>
 
               {renderCategoryList("expense")}
@@ -421,13 +442,12 @@ export default function CategoriesPage() {
           </div>
         )}
 
-        <p className="mt-6 text-xs leading-relaxed text-slate-400">
-          Catatan: perubahan atau penghapusan kategori tidak mengubah
-          riwayat transaksi lama. Nama kategori pada transaksi lama
-          tetap tersimpan sebagai catatan historis.
+        <p className="text-xs leading-relaxed text-[#8a8ea4]">
+          Perubahan nama kategori tidak mengubah transaksi yang sudah kamu
+          catat. Nama kategori lama tetap tersimpan di riwayat transaksi.
         </p>
 
       </div>
-    </main>
+    </AppShell>
   );
 }

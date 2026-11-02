@@ -1,25 +1,30 @@
 
+"use client";
+
+import BrandLockup from "../components/BrandLockup";
+
 export default function OfflinePage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow">
-        <div className="mb-4 text-5xl">📡</div>
-
-        <h1 className="text-2xl font-bold text-slate-800">
-          Kamu Sedang Offline
+    <main className="flex min-h-screen items-center justify-center bg-[#0b0d10] p-5">
+      <div className="finance-card w-full max-w-md p-7 text-center sm:p-9">
+        <div className="mb-5 flex justify-center">
+          <BrandLockup size={42} />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-[#f4f5f7]">
+          Kamu sedang offline
         </h1>
 
-        <p className="mt-3 text-sm leading-relaxed text-slate-500">
-          Koneksi internet sedang tidak tersedia.
-          Periksa jaringanmu dan coba buka kembali Daily Finance.
+        <p className="mt-3 text-sm leading-relaxed text-[#a1a5b7]">
+          Koneksi belum tersedia. Cek jaringanmu, lalu coba lagi.
         </p>
 
-        <a
-          href="/"
-          className="mt-6 inline-block rounded-lg bg-blue-700 px-6 py-3 font-semibold text-white"
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="finance-button-primary mt-6 inline-flex min-w-32 items-center justify-center"
         >
-          Coba Lagi
-        </a>
+          Coba lagi
+        </button>
       </div>
     </main>
   );

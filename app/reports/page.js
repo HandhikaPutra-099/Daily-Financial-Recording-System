@@ -1,8 +1,19 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { supabase } from "../../lib/supabase";
+import AppShell from "../components/AppShell";
+import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
+import { formatUserFacingError } from "../../lib/user-facing-error";
+
+const subscribeToMonth = () => () => {};
+const getCurrentMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function ReportsPage() {
   // 1. STATE
@@ -10,20 +21,17 @@ export default function ReportsPage() {
   const [authReady, setAuthReady] = useState(false);
 
   const [transactions, setTransactions] = useState([]);
+  const [transactionsOwnerId, setTransactionsOwnerId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [selectedMonth, setSelectedMonth] = useState("");
-
-  useEffect(() => {
-  const now = new Date();
-
-  const currentMonth = `${now.getFullYear()}-${String(
-    now.getMonth() + 1
-  ).padStart(2, "0")}`;
-
-  setSelectedMonth(currentMonth);
-}, []);
+  const currentMonth = useSyncExternalStore(
+    subscribeToMonth,
+    getCurrentMonth,
+    () => "",
+  );
+  const [selectedMonthOverride, setSelectedMonthOverride] = useState(null);
+  const selectedMonth = selectedMonthOverride ?? currentMonth;
 
   // 2. MEMERIKSA LOGIN
   useEffect(() => {
@@ -34,7 +42,14 @@ export default function ReportsPage() {
 
       if (!active) return;
 
-      if (error) setError(error.message);
+      if (error) {
+        setError(
+          formatUserFacingError(
+            error,
+            "Akunmu belum berhasil diperiksa. Coba lagi, ya.",
+          ),
+        );
+      }
 
       setUser(data.session?.user ?? null);
       setAuthReady(true);
@@ -57,11 +72,7 @@ export default function ReportsPage() {
 
   // 3. MENGAMBIL TRANSAKSI
   useEffect(() => {
-    if (!user) {
-      setTransactions([]);
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
 
     let active = true;
 
@@ -77,11 +88,18 @@ export default function ReportsPage() {
       if (!active) return;
 
       if (error) {
-        setError(error.message);
+        setTransactions([]);
+        setError(
+          formatUserFacingError(
+            error,
+            "Laporan belum berhasil dimuat. Coba lagi, ya.",
+          ),
+        );
       } else {
         setTransactions(data ?? []);
       }
 
+      setTransactionsOwnerId(user.id);
       setLoading(false);
     }
 
@@ -92,9 +110,15 @@ export default function ReportsPage() {
     };
   }, [user]);
 
+  const currentTransactions =
+    user && transactionsOwnerId === user.id ? transactions : [];
+  const isTransactionsLoading =
+    Boolean(user) && (loading || transactionsOwnerId !== user.id);
+  const currentError = transactionsOwnerId === user?.id ? error : "";
+
   // 4. MEMILIH TRANSAKSI SESUAI BULAN
   const monthlyTransactions = selectedMonth
-  ? transactions.filter((item) =>
+  ? currentTransactions.filter((item) =>
       String(item.date).startsWith(selectedMonth)
     )
   : [];
@@ -163,7 +187,7 @@ export default function ReportsPage() {
       date.getMonth() + 1
     ).padStart(2, "0")}`;
 
-    const monthItems = transactions.filter((item) =>
+    const monthItems = currentTransactions.filter((item) =>
       String(item.date).startsWith(key)
     );
 
@@ -197,8 +221,8 @@ export default function ReportsPage() {
   function handleExportCsv() {
     const headers = [
       "Tanggal",
-      "Jenis Transaksi",
-      "Nama Transaksi",
+      "Jenis transaksi",
+      "Nama transaksi",
       "Kategori",
       "Nominal",
       "Catatan",
@@ -218,7 +242,7 @@ export default function ReportsPage() {
 
     const rows = monthlyTransactions.map((item) => [
       item.date,
-      item.type === "income" ? "Pemasukan" : "Pengeluaran",
+      item.type === "income" ? "Uang masuk" : "Uang keluar",
       item.name,
       item.category,
       Number(item.amount),
@@ -252,26 +276,30 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
+
   // 8. MENUNGGU PEMERIKSAAN LOGIN
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        Memeriksa akun...
+        Menyiapkan DuetKu...
       </div>
     );
   }
 
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-5">
-        <div className="rounded-xl bg-white p-6 text-center shadow">
+      <main className="flex min-h-screen items-center justify-center bg-[#0b0d10] p-5">
+        <div className="finance-card p-6 text-center">
           <p className="mb-4">
-            Silakan login terlebih dahulu.
+            Masuk dulu, ya, untuk melihat halaman ini.
           </p>
 
-          <a href="/" className="font-semibold text-blue-700">
-            Kembali ke Login
-          </a>
+          <Link href="/" className="font-semibold text-[#c8f76a] underline underline-offset-2">
+            Kembali ke DuetKu
+          </Link>
         </div>
       </main>
     );
@@ -279,100 +307,91 @@ export default function ReportsPage() {
 
   // 9. TAMPILAN LAPORAN
   return (
-    <main className="min-h-screen bg-slate-100 p-5 text-slate-800 md:p-10">
-      <div className="mx-auto max-w-5xl">
-
-        {/* HEADER */}
-        <header className="mb-8">
-          <a
-            href="/"
-            className="text-sm font-medium text-blue-700"
-          >
-            ← Kembali ke Dashboard
-          </a>
-
-          <h1 className="mt-4 text-2xl font-bold">
-            Laporan Keuangan
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Pantau kondisi keuanganmu secara berkala.
-          </p>
-        </header>
+    <AppShell user={user} onLogout={handleLogout}>
+      <div className="mx-auto max-w-6xl space-y-5">
+        <PageHeader
+          title="Laporan keuangan"
+          subtitle="Lihat uang masuk dan uang keluar per bulan."
+        />
 
         {/* PILIH BULAN */}
-        <section className="mb-6 rounded-xl bg-white p-5 shadow-sm">
-          <label className="mb-2 block text-sm font-semibold">
-            Pilih Bulan Laporan
+        <section className="finance-card flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6">
+          <div className="w-full sm:max-w-xs">
+          <label htmlFor="report-month" className="mb-2 block text-sm font-semibold text-[#f4f5f7]">
+            Bulan laporan
           </label>
 
           <input
+            id="report-month"
             type="month"
             value={selectedMonth}
             onChange={(event) =>
-              setSelectedMonth(event.target.value)
+              setSelectedMonthOverride(event.target.value)
             }
-            className="w-full rounded-lg border border-slate-300 p-3 sm:max-w-xs"
+            className="finance-input"
           />
+          </div>
 
+          <div>
             <button
             type="button"
             onClick={handleExportCsv}
             disabled={monthlyTransactions.length === 0}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-green-700 p-3 font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+            className="min-h-11 w-full rounded-lg border border-[#b7ef45] bg-[#b7ef45] px-4 text-sm font-semibold text-[#11150b] transition-colors hover:border-[#c8f76a] hover:bg-[#c8f76a] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
-            Unduh Laporan CSV
+            Unduh file CSV
             </button>
-            <p className="mt-2 text-xs text-slate-500">
-            Mengunduh seluruh transaksi pada bulan yang dipilih.
+            <p className="mt-2 text-xs text-[#8a8ea4]">
+            File ini berisi semua transaksimu di bulan yang dipilih.
             </p>
+          </div>
         </section>
 
         {/* ERROR */}
-        {error && (
-          <p className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600">
-            {error}
+        {currentError && (
+          <p role="alert" className="rounded-lg border border-[#49313c] bg-[#301f27] p-3 text-sm text-[#ff9caf]">
+            {currentError}
           </p>
         )}
 
-        {loading ? (
-          <p className="py-10 text-center text-slate-500">
-            Mengambil data laporan...
+        {isTransactionsLoading ? (
+          <p role="status" className="finance-card py-10 text-center text-[#a1a5b7]">
+            Menyiapkan laporan...
           </p>
         ) : (
           <>
             {/* RINGKASAN */}
-            <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Total Pemasukan
+              <div className="finance-card p-5">
+                <p className="text-sm text-[#8a8ea4]">
+                  Uang masuk
                 </p>
 
-                <h2 className="mt-2 text-xl font-bold text-green-600">
+                <h2 className="mt-2 break-words font-mono text-xl font-semibold tabular-nums text-[#36c98b]">
                   {rupiah(totalIncome)}
                 </h2>
               </div>
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Total Pengeluaran
+              <div className="finance-card p-5">
+                <p className="text-sm text-[#8a8ea4]">
+                  Uang keluar
                 </p>
 
-                <h2 className="mt-2 text-xl font-bold text-red-500">
+                <h2 className="mt-2 break-words font-mono text-xl font-semibold tabular-nums text-[#d48af7]">
                   {rupiah(totalExpense)}
                 </h2>
               </div>
 
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Selisih Bulan Ini
+              <div className="finance-card p-5">
+                <p className="text-sm text-[#8a8ea4]">
+                  Sisa arus kas
                 </p>
 
-                <h2 className={`mt-2 text-xl font-bold ${
+                <h2 className={`mt-2 break-words font-mono text-xl font-semibold tabular-nums ${
                   netBalance >= 0
-                    ? "text-blue-700"
-                    : "text-red-500"
+                    ? "text-[#c8f76a]"
+                    : "text-[#d48af7]"
                 }`}>
                   {rupiah(netBalance)}
                 </h2>
@@ -381,74 +400,82 @@ export default function ReportsPage() {
             </section>
 
             {/* GRAFIK BULANAN */}
-            <section className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-2 text-lg font-bold">
-                Perkembangan Keuangan
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-2 text-lg font-semibold text-[#f4f5f7]">
+                Arus uang enam bulan terakhir
               </h2>
 
-              <p className="mb-6 text-sm text-slate-500">
-                Perbandingan enam bulan terakhir.
+              <p className="mb-6 text-sm text-[#a1a5b7]">
+                Perbandingan uang masuk dan uang keluar.
               </p>
 
               {/* LEGENDA */}
-              <div className="mb-4 flex gap-5 text-xs">
+              <div className="mb-4 flex flex-wrap gap-5 text-xs text-[#a1a5b7]">
                 <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-sm bg-green-500" />
-                  Pemasukan
+                  <span className="h-3 w-3 rounded-sm bg-[#b7ef45]" />
+                  Uang masuk
                 </span>
 
                 <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-sm bg-red-400" />
-                  Pengeluaran
+                  <span className="h-3 w-3 rounded-sm bg-[#c66bfa]" />
+                  Uang keluar
                 </span>
               </div>
 
               {/* BATANG GRAFIK */}
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-                {monthlyTrend.map((item) => (
-                  <div key={item.key} className="min-w-0">
-
-                    <div className="flex h-36 items-end justify-center gap-1 border-b border-slate-200 pb-1">
-                      <div
-                        title={`Pemasukan: ${rupiah(item.income)}`}
-                        className="w-4 rounded-t bg-green-500"
-                        style={{
-                          height: `${(item.income / maxMonthlyValue) * 100}%`,
-                          minHeight: item.income > 0 ? "3px" : "0",
-                        }}
-                      />
-
-                      <div
-                        title={`Pengeluaran: ${rupiah(item.expense)}`}
-                        className="w-4 rounded-t bg-red-400"
-                        style={{
-                          height: `${(item.expense / maxMonthlyValue) * 100}%`,
-                          minHeight: item.expense > 0 ? "3px" : "0",
-                        }}
-                      />
+              {currentTransactions.length === 0 ? (
+                <EmptyState
+                  title="Belum ada transaksi nih."
+                  description="Yuk, mulai catat pemasukan dan pengeluaranmu."
+                />
+              ) : (
+                <div
+                  role="img"
+                  aria-label="Grafik perbandingan pemasukan dan pengeluaran per bulan"
+                  className="grid grid-cols-3 gap-3 sm:grid-cols-6"
+                >
+                  {monthlyTrend.map((item) => (
+                    <div key={item.key} className="min-w-0">
+                      <div className="flex h-36 items-end justify-center gap-1 border-b border-[#2a2e38] pb-1">
+                        <div
+                          title={`Uang masuk: ${rupiah(item.income)}`}
+                          className="w-4 rounded-t bg-[#b7ef45]"
+                          style={{
+                            height: `${(item.income / maxMonthlyValue) * 100}%`,
+                            minHeight: item.income > 0 ? "3px" : "0",
+                          }}
+                        />
+                        <div
+                          title={`Uang keluar: ${rupiah(item.expense)}`}
+                          className="w-4 rounded-t bg-[#c66bfa]"
+                          style={{
+                            height: `${(item.expense / maxMonthlyValue) * 100}%`,
+                            minHeight: item.expense > 0 ? "3px" : "0",
+                          }}
+                        />
+                      </div>
+                      <p className="mt-2 text-center text-xs text-[#8a8ea4]">
+                        {item.label}
+                      </p>
                     </div>
-
-                    <p className="mt-2 text-center text-xs text-slate-500">
-                      {item.label}
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* PENGELUARAN PER KATEGORI */}
-            <section className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-2 text-lg font-bold">
-                Pengeluaran Berdasarkan Kategori
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-2 text-lg font-semibold text-[#f4f5f7]">
+                Uang keluar per kategori
               </h2>
 
-              <p className="mb-6 text-sm text-slate-500">
-                Kategori dengan pengeluaran terbesar.
+              <p className="mb-6 text-sm text-[#a1a5b7]">
+                Kategori dengan uang keluar terbanyak.
               </p>
 
               {expenseCategories.length === 0 ? (
-                <p className="py-5 text-center text-sm text-slate-500">
-                  Belum ada pengeluaran pada bulan ini.
+                <p className="rounded-lg bg-[#1d2028] py-5 text-center text-sm text-[#a1a5b7]">
+                  Belum ada pengeluaran bulan ini. Catatanmu akan muncul di sini.
                 </p>
               ) : (
                 <div className="space-y-5">
@@ -456,18 +483,18 @@ export default function ReportsPage() {
                     <div key={item.name}>
 
                       <div className="mb-2 flex justify-between gap-3 text-sm">
-                        <span className="font-medium">
+                        <span className="min-w-0 truncate font-medium text-[#f4f5f7]">
                           {item.name}
                         </span>
 
-                        <span className="font-semibold">
+                        <span className="shrink-0 font-mono font-semibold tabular-nums text-[#f4f5f7]">
                           {rupiah(item.total)}
                         </span>
                       </div>
 
-                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2.5 overflow-hidden rounded-full bg-[#2a2e38]">
                         <div
-                          className="h-full rounded-full bg-blue-600"
+                          className="h-full rounded-full bg-[#b7ef45]"
                           style={{
                             width: `${(item.total / maxCategoryExpense) * 100}%`,
                           }}
@@ -481,27 +508,27 @@ export default function ReportsPage() {
             </section>
 
             {/* TOTAL TRANSAKSI */}
-            <section className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-2 text-lg font-bold">
-                Ringkasan Aktivitas
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-2 text-lg font-semibold text-[#f4f5f7]">
+                Aktivitas bulan ini
               </h2>
 
-              <p className="text-sm text-slate-500">
-                Total transaksi pada bulan yang dipilih:
+              <p className="text-sm text-[#a1a5b7]">
+                Jumlah transaksi di bulan yang dipilih:
               </p>
 
-              <h3 className="mt-2 text-3xl font-bold">
+              <h3 className="mt-2 font-mono text-3xl font-semibold tabular-nums text-[#f4f5f7]">
                 {monthlyTransactions.length}
               </h3>
 
-              <p className="mt-1 text-sm text-slate-500">
-                Transaksi tercatat
+              <p className="mt-1 text-sm text-[#a1a5b7]">
+                transaksi tercatat
               </p>
             </section>
 
           </>
         )}
       </div>
-    </main>
+    </AppShell>
   );
 }

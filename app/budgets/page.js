@@ -1,8 +1,21 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { supabase } from "../../lib/supabase";
+import AppShell from "../components/AppShell";
+import ConfirmButton from "../components/ConfirmButton";
+import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
+import StatCard from "../components/StatCard";
+import { formatUserFacingError } from "../../lib/user-facing-error";
+
+const subscribeToMonth = () => () => {};
+const getCurrentMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function BudgetsPage() {
   // 1. STATE AUTENTIKASI
@@ -13,6 +26,7 @@ export default function BudgetsPage() {
   const [categories, setCategories] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [dataOwnerId, setDataOwnerId] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -25,18 +39,13 @@ export default function BudgetsPage() {
   const [amount, setAmount] = useState("");
   const [editingId, setEditingId] = useState(null);
 
-  // Memilih bulan saat ini
-    const [selectedMonth, setSelectedMonth] = useState("");
- // Menentukan bulan berdasarkan waktu lokal perangkat
-    useEffect(() => {
-    const now = new Date();
-
-    setSelectedMonth(
-        `${now.getFullYear()}-${String(
-        now.getMonth() + 1
-        ).padStart(2, "0")}`
-    );
-    }, []);
+  const currentMonth = useSyncExternalStore(
+    subscribeToMonth,
+    getCurrentMonth,
+    () => "",
+  );
+  const [selectedMonthOverride, setSelectedMonthOverride] = useState(null);
+  const selectedMonth = selectedMonthOverride ?? currentMonth;
 
   // 4. MEMERIKSA LOGIN
   useEffect(() => {
@@ -47,7 +56,14 @@ export default function BudgetsPage() {
 
       if (!active) return;
 
-      if (error) setError(error.message);
+      if (error) {
+        setError(
+          formatUserFacingError(
+            error,
+            "Akunmu belum berhasil diperiksa. Coba lagi, ya.",
+          ),
+        );
+      }
 
       setUser(data.session?.user ?? null);
       setAuthReady(true);
@@ -69,17 +85,8 @@ export default function BudgetsPage() {
   }, []);
 
   // 5. MENGAMBIL KATEGORI, ANGGARAN, DAN TRANSAKSI
-    useEffect(() => {
-    if (!user || !selectedMonth) {
-        if (!user) {
-        setCategories([]);
-        setBudgets([]);
-        setTransactions([]);
-        }
-
-        setLoading(false);
-        return;
-    }
+  useEffect(() => {
+    if (!user || !selectedMonth) return;
 
     let active = true;
 
@@ -126,14 +133,22 @@ export default function BudgetsPage() {
         transactionResult.error;
 
       if (firstError) {
-        setError(firstError.message);
+        setError(
+          formatUserFacingError(
+            firstError,
+            "Data anggaran belum berhasil dimuat. Coba lagi, ya.",
+          ),
+        );
       }
 
-      const categoryData = categoryResult.data ?? [];
+      const categoryData = categoryResult.error ? [] : categoryResult.data ?? [];
 
       setCategories(categoryData);
-      setBudgets(budgetResult.data ?? []);
-      setTransactions(transactionResult.data ?? []);
+      setBudgets(budgetResult.error ? [] : budgetResult.data ?? []);
+      setTransactions(
+        transactionResult.error ? [] : transactionResult.data ?? []
+      );
+      setDataOwnerId(`${user.id}:${selectedMonth}`);
 
       setSelectedCategory((current) => {
         if (categoryData.some((item) => item.name === current)) {
@@ -154,7 +169,17 @@ export default function BudgetsPage() {
   }, [user, selectedMonth]);
 
   // 6. MENGHITUNG PENGELUARAN PER KATEGORI
-  const spentByCategory = transactions.reduce((result, item) => {
+  const currentDataKey = user ? `${user.id}:${selectedMonth}` : "";
+  const hasCurrentData = Boolean(user && dataOwnerId === currentDataKey);
+  const currentCategories = hasCurrentData ? categories : [];
+  const currentBudgets = hasCurrentData ? budgets : [];
+  const currentTransactions = hasCurrentData ? transactions : [];
+  const isDataLoading =
+    Boolean(user) && (loading || dataOwnerId !== currentDataKey);
+  const currentError = hasCurrentData ? error : "";
+  const currentMessage = hasCurrentData ? message : "";
+
+  const spentByCategory = currentTransactions.reduce((result, item) => {
     const category = item.category || "Tanpa kategori";
 
     result[category] =
@@ -164,20 +189,20 @@ export default function BudgetsPage() {
   }, {});
 
   // 7. MENGHITUNG TOTAL ANGGARAN
-  const totalBudget = budgets.reduce(
+  const totalBudget = currentBudgets.reduce(
     (total, item) => total + Number(item.amount),
     0
   );
 
   // Pengeluaran dalam kategori yang sudah dianggarkan
-  const totalBudgetedSpent = budgets.reduce(
+  const totalBudgetedSpent = currentBudgets.reduce(
     (total, item) =>
       total + (spentByCategory[item.category] || 0),
     0
   );
 
   // Seluruh pengeluaran bulan ini
-  const totalExpense = transactions.reduce(
+  const totalExpense = currentTransactions.reduce(
     (total, item) => total + Number(item.amount || 0),
     0
   );
@@ -200,7 +225,7 @@ export default function BudgetsPage() {
 
     if (!selectedCategory || numericAmount <= 0 ||
         !Number.isFinite(numericAmount)) {
-      setError("Pilih kategori dan masukkan nominal yang valid.");
+      setError("Pilih kategori dan masukkan nominal yang benar, ya.");
       return;
     }
 
@@ -239,10 +264,16 @@ export default function BudgetsPage() {
       }
 
       if (result.error) {
-        setError(result.error.message);
+        setError(
+          formatUserFacingError(
+            result.error,
+            "Anggaran belum berhasil disimpan. Coba lagi, ya.",
+          ),
+        );
         return;
       }
 
+      setDataOwnerId(`${user.id}:${selectedMonth}`);
       const savedBudget = result.data;
 
       setBudgets((current) => {
@@ -263,11 +294,14 @@ export default function BudgetsPage() {
       setEditingId(null);
       setAmount("");
 
-      setMessage(
-        "Anggaran berhasil disimpan."
-      );
+      setMessage("Anggaran berhasil disimpan.");
     } catch (err) {
-      setError(err.message);
+      setError(
+        formatUserFacingError(
+          err,
+          "Anggaran belum berhasil disimpan. Coba lagi, ya.",
+        ),
+      );
     } finally {
       setSaving(false);
     }
@@ -292,12 +326,6 @@ export default function BudgetsPage() {
 
   // 12. MENGHAPUS ANGGARAN
   async function handleDelete(item) {
-    const confirmed = window.confirm(
-      `Hapus anggaran kategori ${item.category}?`
-    );
-
-    if (!confirmed) return;
-
     setError("");
     setMessage("");
 
@@ -307,10 +335,16 @@ export default function BudgetsPage() {
       .eq("id", item.id);
 
     if (error) {
-      setError(error.message);
+      setError(
+        formatUserFacingError(
+          error,
+          "Anggaran belum berhasil dihapus. Coba lagi, ya.",
+        ),
+      );
       return;
     }
 
+    setDataOwnerId(`${user.id}:${selectedMonth}`);
     setBudgets((current) =>
       current.filter((budget) => budget.id !== item.id)
     );
@@ -326,15 +360,19 @@ export default function BudgetsPage() {
   const unbudgetedCategories = Object.entries(spentByCategory)
     .filter(
       ([name]) =>
-        !budgets.some((item) => item.category === name)
+        !currentBudgets.some((item) => item.category === name)
     )
     .sort((a, b) => b[1] - a[1]);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
 
   // 14. MENUNGGU LOGIN
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        Memeriksa akun...
+        Menyiapkan DuetKu...
       </div>
     );
   }
@@ -342,15 +380,15 @@ export default function BudgetsPage() {
   // 15. JIKA BELUM LOGIN
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-5">
-        <div className="rounded-xl bg-white p-6 text-center shadow">
+      <main className="flex min-h-screen items-center justify-center bg-[#0b0d10] p-5">
+        <div className="finance-card p-6 text-center">
           <p className="mb-4">
-            Silakan login terlebih dahulu.
+            Masuk dulu, ya, untuk melihat halaman ini.
           </p>
 
-          <a href="/" className="font-semibold text-blue-700">
-            Kembali ke Login
-          </a>
+          <Link href="/" className="font-semibold text-[#c8f76a] underline underline-offset-2">
+            Kembali ke DuetKu
+          </Link>
         </div>
       </main>
     );
@@ -358,144 +396,99 @@ export default function BudgetsPage() {
 
   // 16. TAMPILAN ANGGARAN
   return (
-    <main className="min-h-screen bg-slate-100 p-5 text-slate-800 md:p-10">
-      <div className="mx-auto max-w-5xl">
-
-        {/* HEADER */}
-        <header className="mb-8">
-          <a
-            href="/"
-            className="text-sm font-medium text-blue-700"
-          >
-            ← Kembali ke Dashboard
-          </a>
-
-          <h1 className="mt-4 text-2xl font-bold">
-            Anggaran Bulanan
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Atur dan pantau batas pengeluaranmu.
-          </p>
-        </header>
+    <AppShell user={user} onLogout={handleLogout}>
+      <div className="mx-auto max-w-6xl space-y-5">
+        <PageHeader
+          title="Anggaran"
+          subtitle="Atur batas uang keluar per kategori dan pantau pemakaiannya."
+        />
 
         {/* PILIH BULAN */}
-        <section className="mb-6 rounded-xl bg-white p-5 shadow-sm">
-          <label className="mb-2 block text-sm font-semibold">
-            Periode Anggaran
+        <section className="finance-card p-5 sm:p-6">
+          <label htmlFor="budget-month" className="mb-2 block text-sm font-semibold text-[#f4f5f7]">
+            Bulan anggaran
           </label>
 
           <input
+            id="budget-month"
             type="month"
             value={selectedMonth}
             disabled={Boolean(editingId)}
             onChange={(event) =>
-              setSelectedMonth(event.target.value)
+              setSelectedMonthOverride(event.target.value)
             }
-            className="w-full rounded-lg border border-slate-300 p-3 sm:max-w-xs disabled:bg-slate-100"
+            className="finance-input w-full sm:max-w-xs disabled:bg-[#262a33]"
           />
         </section>
 
         {/* PESAN ERROR */}
-        {error && (
-          <p className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600">
-            {error}
+        {currentError && (
+          <p role="alert" className="rounded-lg border border-[#49313c] bg-[#301f27] p-3 text-sm text-[#ff9caf]">
+            {currentError}
           </p>
         )}
 
         {/* PESAN BERHASIL */}
-        {message && (
-          <p className="mb-5 rounded-lg bg-green-50 p-3 text-sm text-green-700">
-            {message}
+        {currentMessage && (
+          <p role="status" className="rounded-lg border border-[#245240] bg-[#172a25] p-3 text-sm text-[#62dfa7]">
+            {currentMessage}
           </p>
         )}
 
-        {loading ? (
-          <p className="py-10 text-center text-slate-500">
-            Mengambil data anggaran...
+        {isDataLoading ? (
+          <p role="status" className="finance-card py-10 text-center text-[#a1a5b7]">
+            Menyiapkan anggaran...
           </p>
         ) : (
           <>
             {/* RINGKASAN */}
-            <section className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Total Anggaran
-                </p>
-                <h2 className="mt-2 text-xl font-bold text-blue-700">
-                  {rupiah(totalBudget)}
-                </h2>
-              </div>
-
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Terpakai pada Kategori Beranggaran
-                </p>
-                <h2 className="mt-2 text-xl font-bold text-red-500">
-                  {rupiah(totalBudgetedSpent)}
-                </h2>
-              </div>
-
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Sisa Anggaran
-                </p>
-                <h2 className={`mt-2 text-xl font-bold ${
-                  remainingBudget >= 0
-                    ? "text-green-600"
-                    : "text-red-500"
-                }`}>
-                  {rupiah(remainingBudget)}
-                </h2>
-              </div>
-
-              <div className="rounded-xl bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">
-                  Total Pengeluaran
-                </p>
-                <h2 className="mt-2 text-xl font-bold text-slate-800">
-                  {rupiah(totalExpense)}
-                </h2>
-              </div>
-
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Total batas anggaran" value={rupiah(totalBudget)} variant="primary" />
+              <StatCard label="Sudah terpakai" value={rupiah(totalBudgetedSpent)} variant="expense" />
+              <StatCard
+                label="Sisa anggaran"
+                value={rupiah(remainingBudget)}
+                variant={remainingBudget >= 0 ? "income" : "expense"}
+              />
+              <StatCard label="Uang keluar bulan ini" value={rupiah(totalExpense)} />
             </section>
 
             {/* FORM ANGGARAN */}
-            <section className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-5 text-lg font-bold">
-                {editingId ? "Edit Anggaran" : "Tambah Anggaran"}
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-5 text-lg font-semibold text-[#f4f5f7]">
+                {editingId ? "Ubah anggaran" : "Tambah anggaran"}
               </h2>
 
-              {categories.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  Belum ada kategori pengeluaran.
-                  <a
+              {currentCategories.length === 0 ? (
+                <p className="text-sm text-[#a1a5b7]">
+                  Belum ada kategori uang keluar nih.
+                  <Link
                     href="/categories"
-                    className="ml-1 font-semibold text-blue-700"
+                    className="ml-1 font-semibold text-[#c8f76a] underline underline-offset-2"
                   >
-                    Buat kategori dahulu
-                  </a>
+                    Buat kategori dulu
+                  </Link>
                 </p>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
-                    <label className="mb-1 block text-sm font-medium">
-                      Kategori Pengeluaran
+                    <label htmlFor="budget-category" className="mb-1.5 block text-sm font-medium text-[#f4f5f7]">
+                      Kategori pengeluaran
                     </label>
 
                     <select
+                      id="budget-category"
                       value={selectedCategory}
                       disabled={Boolean(editingId)}
                       onChange={(event) =>
                         setSelectedCategory(event.target.value)
                       }
                       required
-                      className="w-full rounded-lg border border-slate-300 p-3 disabled:bg-slate-100"
+                      className="finance-input disabled:bg-[#262a33]"
                     >
-                      <option value="">Pilih kategori</option>
+                      <option value="">Pilih kategori yang sesuai</option>
 
-                      {categories.map((item) => (
+                      {currentCategories.map((item) => (
                         <option key={item.id} value={item.name}>
                           {item.name}
                         </option>
@@ -504,11 +497,12 @@ export default function BudgetsPage() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-sm font-medium">
-                      Batas Anggaran (Rupiah)
+                    <label htmlFor="budget-amount" className="mb-1.5 block text-sm font-medium text-[#f4f5f7]">
+                      Batas pengeluaran (Rupiah)
                     </label>
 
                     <input
+                      id="budget-amount"
                       type="number"
                       min="1"
                       step="1"
@@ -516,31 +510,31 @@ export default function BudgetsPage() {
                       onChange={(event) =>
                         setAmount(event.target.value)
                       }
-                      placeholder="Contoh: 500000"
+                      placeholder="Contoh: 500.000"
                       required
-                      className="w-full rounded-lg border border-slate-300 p-3"
+                      className="finance-input"
                     />
                   </div>
 
                   <button
                     type="submit"
                     disabled={saving}
-                    className="w-full rounded-lg bg-blue-700 p-3 font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+                    className="finance-button-primary w-full disabled:opacity-50"
                   >
                     {saving
                       ? "Menyimpan..."
                       : editingId
-                        ? "Simpan Perubahan"
-                        : "Simpan Anggaran"}
+                        ? "Simpan perubahan"
+                        : "Simpan anggaran"}
                   </button>
 
                   {editingId && (
                     <button
                       type="button"
                       onClick={handleCancel}
-                      className="w-full rounded-lg border border-slate-300 p-3 font-semibold"
+                      className="finance-button-secondary w-full"
                     >
-                      Batal Edit
+                      Batal ubah
                     </button>
                   )}
                 </form>
@@ -548,18 +542,21 @@ export default function BudgetsPage() {
             </section>
 
             {/* DAFTAR ANGGARAN */}
-            <section className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-5 text-lg font-bold">
-                Rincian Anggaran
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-5 text-lg font-semibold text-[#f4f5f7]">
+                Rincian anggaran
               </h2>
 
-              {budgets.length === 0 ? (
-                <p className="py-5 text-center text-sm text-slate-500">
-                  Belum ada anggaran pada bulan ini.
-                </p>
+              {currentBudgets.length === 0 ? (
+                <EmptyState
+                  title="Belum ada anggaran bulan ini."
+                  description="Pilih kategori uang keluar, lalu tentukan batasnya."
+                  actionLabel={currentCategories.length === 0 ? "Kelola kategori" : undefined}
+                  actionHref={currentCategories.length === 0 ? "/categories" : undefined}
+                />
               ) : (
                 <div className="space-y-6">
-                  {budgets.map((item) => {
+                  {currentBudgets.map((item) => {
                     const spent =
                       spentByCategory[item.category] || 0;
 
@@ -583,18 +580,18 @@ export default function BudgetsPage() {
 
                     const progressColor =
                       percentage > 100
-                        ? "bg-red-600"
+                        ? "bg-[#f0718c]"
                         : percentage >= 80
-                          ? "bg-amber-500"
-                          : "bg-green-500";
+                          ? "bg-[#f0c66a]"
+                          : "bg-[#b7ef45]";
 
                     return (
                       <div
                         key={item.id}
-                        className="border-b border-slate-100 pb-6 last:border-0 last:pb-0"
+                        className="border-b border-[#2a2e38] pb-6 last:border-0 last:pb-0"
                       >
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="font-semibold">
+                          <h3 className="font-semibold text-[#f4f5f7]">
                             {item.category}
                           </h3>
 
@@ -603,14 +600,21 @@ export default function BudgetsPage() {
                           </span>
                         </div>
 
-                        <div className="mb-2 h-3 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="mb-2 h-2.5 overflow-hidden rounded-full bg-[#2a2e38]"
+                          role="progressbar"
+                          aria-label={`Penggunaan anggaran ${item.category}`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.min(Math.max(Math.round(percentage), 0), 100)}
+                        >
                           <div
                             className={`h-full rounded-full ${progressColor}`}
                             style={{ width: `${progressWidth}%` }}
                           />
                         </div>
 
-                        <div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500">
+                        <div className="flex flex-wrap justify-between gap-2 text-xs text-[#a1a5b7]">
                           <span>
                             Terpakai {rupiah(spent)} dari {rupiah(budgetAmount)}
                           </span>
@@ -618,8 +622,8 @@ export default function BudgetsPage() {
                           <span
                             className={
                               remaining >= 0
-                                ? "font-semibold text-green-600"
-                                : "font-semibold text-red-600"
+                                ? "font-semibold text-[#36c98b]"
+                                : "font-semibold text-[#f0718c]"
                             }
                           >
                             {remaining >= 0
@@ -628,24 +632,23 @@ export default function BudgetsPage() {
                           </span>
                         </div>
 
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => handleEdit(item)}
-                            className="rounded-md bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700"
+                            className="min-h-11 rounded-lg border border-[#383d49] px-3 text-xs font-semibold text-[#c8f76a] transition-colors hover:bg-[#232631]"
                           >
                             Edit
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(item)}
-                            className="rounded-md bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700"
-                          >
-                            Hapus
-                          </button>
+                          <ConfirmButton
+                            label="Hapus"
+                            confirmLabel={`Yakin mau menghapus anggaran ${item.category}?`}
+                            confirmDescription="Anggaran yang dihapus tidak bisa dikembalikan."
+                            onConfirm={() => handleDelete(item)}
+                          />
 
-                          <span className="ml-auto text-xs text-slate-500">
+                          <span className="ml-auto text-xs text-[#8a8ea4]">
                             {status}
                           </span>
                         </div>
@@ -657,31 +660,31 @@ export default function BudgetsPage() {
             </section>
 
             {/* PENGELUARAN TANPA ANGGARAN */}
-            <section className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-2 text-lg font-bold">
-                Pengeluaran Tanpa Anggaran
+            <section className="finance-card p-5 sm:p-6">
+              <h2 className="mb-2 text-lg font-semibold text-[#f4f5f7]">
+                Uang keluar di luar anggaran
               </h2>
 
-              <p className="mb-4 text-sm text-slate-500">
-                Pengeluaran pada kategori yang belum memiliki batas anggaran.
+              <p className="mb-4 text-sm text-[#a1a5b7]">
+                Uang keluar di kategori yang belum punya batas anggaran.
               </p>
 
               {unbudgetedCategories.length === 0 ? (
-                <p className="text-sm text-green-600">
-                  Semua kategori pengeluaran yang tercatat sudah memiliki anggaran.
+                <p className="rounded-lg bg-[#172a25] p-4 text-sm text-[#62dfa7]">
+                  Semua pengeluaran bulan ini sudah masuk anggaran.
                 </p>
               ) : (
                 <div className="space-y-3">
                   {unbudgetedCategories.map(([name, spent]) => (
                     <div
                       key={name}
-                      className="flex justify-between gap-3 border-b border-slate-100 pb-3 last:border-0"
+                      className="flex flex-wrap justify-between gap-3 border-b border-[#2a2e38] pb-3 last:border-0"
                     >
-                      <span className="text-sm font-medium">
+                      <span className="text-sm font-medium text-[#f4f5f7]">
                         {name}
                       </span>
 
-                      <span className="text-sm font-semibold text-red-500">
+                      <span className="font-mono text-sm font-semibold tabular-nums text-[#d48af7]">
                         {rupiah(spent)}
                       </span>
                     </div>
@@ -694,6 +697,6 @@ export default function BudgetsPage() {
         )}
 
       </div>
-    </main>
+    </AppShell>
   );
 }
